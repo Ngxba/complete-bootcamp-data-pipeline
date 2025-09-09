@@ -1,18 +1,21 @@
 services:
+  # PostgreSQL OLTP database
   postgres:
-    build:
-      context: ./postgresql
-      dockerfile: Dockerfile
+    image: postgres:16-alpine
     container_name: postgres-oltp
     restart: unless-stopped
+    command: ["postgres", "-c", "wal_level=logical", "-c", "max_wal_senders=10", "-c", "max_replication_slots=10", "-c", "wal_keep_size=64"]
     environment:
+      # Keep credentials/dev DB simple for local development only
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=main
     ports:
       - "5432:5432"
     volumes:
+      # Persistent data directory (bind mount for easy inspection)
       - ./postgresql/data:/var/lib/postgresql/data
+      # Initialization SQL scripts (run once on first boot)
       - ./postgresql/init:/docker-entrypoint-initdb.d
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
@@ -22,7 +25,92 @@ services:
     networks:
       - internal
 
+  zookeeper:
+    image: debezium/zookeeper:${DEBEZIUM_VERSION:-2.1.2.Final}
+    platform: linux/amd64
+    container_name: zookeeper
+    restart: unless-stopped
+    ports:
+      - "2181:2181"
+    networks:
+      - internal
+
+  kafka:
+    image: debezium/kafka:${DEBEZIUM_VERSION:-2.1.2.Final}
+    platform: linux/amd64
+    container_name: kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    environment:
+      - ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_BROKER_ID=1
+      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+    ports:
+      - "9092:9092"
+    networks:
+      - internal
+
+  connect:
+    image: debezium/connect:${DEBEZIUM_VERSION:-2.1.2.Final}
+    platform: linux/amd64
+    container_name: debezium-connect
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:9092
+      - GROUP_ID=1
+      - CONFIG_STORAGE_TOPIC=connect_configs
+      - OFFSET_STORAGE_TOPIC=connect_offsets
+      - STATUS_STORAGE_TOPIC=connect_statuses
+      - KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter
+      - ENABLE_DEBEZIUM_SCRIPTING=true
+      - ENABLE_DEBEZIUM_KC_REST_EXTENSION=true
+      - CONNECT_REST_EXTENSION_CLASSES=io.debezium.kcrestextension.DebeziumConnectRestExtension
+    ports:
+      - "8083:8083"
+    networks:
+      - internal
+
+  debezium-ui:
+    image: debezium/debezium-ui:${DEBEZIUM_VERSION:-2.1.2.Final}
+    platform: linux/amd64
+    container_name: debezium-ui
+    restart: unless-stopped
+    depends_on:
+      - connect
+    environment:
+      - KAFKA_CONNECT_URIS=http://connect:8083
+    ports:
+      - "8080:8080"
+    networks:
+      - internal
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    restart: unless-stopped
+    depends_on:
+      - kafka
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+      - KAFKA_CLUSTERS_0_ZOOKEEPER=zookeeper:2181
+      - KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME=connect
+      - KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS=http://connect:8083
+    ports:
+      - "8081:8080"
+    networks:
+      - internal
 
 networks:
   internal:
-
