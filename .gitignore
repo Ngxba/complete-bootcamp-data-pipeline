@@ -11,4 +11,3 @@ wheels/
 
 # PostgreSQL data
 postgresql/data/*
-!postgresql/data/.gitkeep
