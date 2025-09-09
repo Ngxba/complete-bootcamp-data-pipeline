@@ -11,3 +11,5 @@ wheels/
 
 # PostgreSQL data
 postgresql/data/*
+
+.DS_Store
