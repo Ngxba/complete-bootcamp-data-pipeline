@@ -36,10 +36,10 @@ uv sync
   - `seed_sample()` inserts a small realistic dataset.
 - **Usage**:
 ```bash
-uv run python script/db_sqlalchemy.py
+uv run script/db_sqlalchemy.py
 
 # or explicitly
-uv run python -c "from script.db_sqlalchemy import create_schema, seed_sample; create_schema(); seed_sample()"
+uv run -c "from script.db_sqlalchemy import create_schema, seed_sample; create_schema(); seed_sample()"
 ```
 
 #### script/data_generators.py
@@ -51,7 +51,7 @@ uv run python -c "from script.db_sqlalchemy import create_schema, seed_sample; c
 - **Output**: Prints counts and one example order with its items.
 - **Usage**:
 ```bash
-uv run python script/generate_sample.py
+uv run script/generate_sample.py
 ```
 
 #### script/stream_orders.py
@@ -62,13 +62,13 @@ uv run python script/generate_sample.py
   - `--url`: database URL (defaults to `DATABASE_URL` env or the local default)
 - **Usage**:
 ```bash
-uv run python script/stream_orders.py --interval 3 --count 0
+uv run script/stream_orders.py --interval 3 --count 0
 
 # Insert 10 orders quickly
-uv run python script/stream_orders.py --interval 0.5 --count 10
+uv run script/stream_orders.py --interval 0.5 --count 10
 
 # Custom connection string
-uv run python script/stream_orders.py --url postgresql+psycopg2://postgres:postgres@localhost:5432/main
+uv run script/stream_orders.py --url postgresql+psycopg2://postgres:postgres@localhost:5432/main
 ```
 
 ### Environment variables
