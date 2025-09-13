@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.operators.python import PythonOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 
 DEFAULT_ARGS = {
@@ -12,19 +13,11 @@ DEFAULT_ARGS = {
     "retry_delay": timedelta(minutes=5),
 }
 
-with DAG(
-    dag_id="daily_sales_aggregation",
-    default_args=DEFAULT_ARGS,
-    start_date=datetime(2024, 1, 1),
-    schedule_interval="@daily",
-    catchup=False,
-    tags=["tutorial", "analytics"],
-) as dag:
-
-    create_table = PostgresOperator(
-        task_id="create_table",
-        postgres_conn_id="postgres_oltp",
-        sql="""
+def create_table(**context):
+    hook = PostgresHook(postgres_conn_id="postgres_oltp")
+    conn = hook.get_conn()
+    cursor = conn.cursor()
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS daily_sales (
             day date not null,
             product_id bigint not null,
@@ -33,13 +26,17 @@ with DAG(
             revenue_cents integer not null,
             primary key (day, product_id)
         );
-        """,
-    )
+    """)
+    conn.commit()
+    cursor.close()
+    conn.close()
 
-    upsert_yesterday = PostgresOperator(
-        task_id="upsert_yesterday",
-        postgres_conn_id="postgres_oltp",
-        sql="""
+
+def upsert_yesterday(**context):
+    hook = PostgresHook(postgres_conn_id="postgres_oltp")
+    conn = hook.get_conn()
+    cursor = conn.cursor()
+    cursor.execute("""
         WITH base AS (
             SELECT
                 DATE(o.created_at) AS day,
@@ -49,7 +46,7 @@ with DAG(
                 SUM(oi.qty * oi.unit_price_cents) AS revenue_cents
             FROM orders o
             JOIN order_items oi ON oi.order_id = o.order_id
-            WHERE DATE(o.created_at) = DATE('{{ ds }}')
+            WHERE DATE(o.created_at) = DATE(%s)
             GROUP BY 1, 2
         )
         INSERT INTO daily_sales(day, product_id, orders, qty, revenue_cents)
@@ -59,7 +56,29 @@ with DAG(
           orders = EXCLUDED.orders,
           qty = EXCLUDED.qty,
           revenue_cents = EXCLUDED.revenue_cents;
-        """,
+    """, (context['ds'],))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+with DAG(
+    dag_id="daily_sales_aggregation",
+    default_args=DEFAULT_ARGS,
+    start_date=datetime(2024, 1, 1),
+    schedule="@daily",
+    catchup=False,
+    tags=["tutorial", "analytics"],
+) as dag:
+
+    create_table_task = PythonOperator(
+        task_id="create_table",
+        python_callable=create_table,
     )
 
-    create_table >> upsert_yesterday
+    upsert_yesterday_task = PythonOperator(
+        task_id="upsert_yesterday",
+        python_callable=upsert_yesterday,
+    )
+
+    create_table_task >> upsert_yesterday_task

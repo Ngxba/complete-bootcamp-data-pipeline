@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.providers.postgres.operators.postgres import PostgresOperator
+from airflow.operators.python import PythonOperator
+from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 
 DEFAULT_ARGS = {
@@ -12,20 +13,13 @@ DEFAULT_ARGS = {
     "retry_delay": timedelta(minutes=5),
 }
 
-with DAG(
-    dag_id="data_quality_checks",
-    default_args=DEFAULT_ARGS,
-    start_date=datetime(2024, 1, 1),
-    schedule_interval="@daily",
-    catchup=False,
-    tags=["tutorial", "dq"],
-) as dag:
-
-    dq_checks = PostgresOperator(
-        task_id="dq_checks",
-        postgres_conn_id="postgres_oltp",
-        sql="""
-        -- Fail if negative totals
+def dq_checks(**context):
+    hook = PostgresHook(postgres_conn_id="postgres_oltp")
+    conn = hook.get_conn()
+    cursor = conn.cursor()
+    
+    # Fail if negative totals
+    cursor.execute("""
         DO $$
         BEGIN
             IF EXISTS (SELECT 1 FROM orders WHERE total_cents < 0 OR subtotal_cents < 0 OR shipping_cents < 0 OR tax_cents < 0) THEN
@@ -33,8 +27,10 @@ with DAG(
             END IF;
         END
         $$;
-
-        -- Fail if any order items have non-positive qty or negative price
+    """)
+    
+    # Fail if any order items have non-positive qty or negative price
+    cursor.execute("""
         DO $$
         BEGIN
             IF EXISTS (SELECT 1 FROM order_items WHERE qty <= 0 OR unit_price_cents < 0) THEN
@@ -42,8 +38,10 @@ with DAG(
             END IF;
         END
         $$;
-
-        -- Fail if any order references missing customer or address
+    """)
+    
+    # Fail if any order references missing customer or address
+    cursor.execute("""
         DO $$
         BEGIN
             IF EXISTS (
@@ -57,5 +55,23 @@ with DAG(
             END IF;
         END
         $$;
-        """,
+    """)
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
+with DAG(
+    dag_id="data_quality_checks",
+    default_args=DEFAULT_ARGS,
+    start_date=datetime(2024, 1, 1),
+    schedule="@daily",
+    catchup=False,
+    tags=["tutorial", "dq"],
+) as dag:
+
+    dq_checks_task = PythonOperator(
+        task_id="dq_checks",
+        python_callable=dq_checks,
     )

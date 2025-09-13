@@ -61,7 +61,7 @@ with DAG(
     dag_id="stream_new_orders",
     default_args=DEFAULT_ARGS,
     start_date=datetime(2024, 1, 1),
-    schedule_interval=None,
+    schedule=None,
     catchup=False,
     params={"count": 10, "interval": 0.5},
     tags=["tutorial", "stream"],

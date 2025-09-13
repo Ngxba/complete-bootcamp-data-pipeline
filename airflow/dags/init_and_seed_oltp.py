@@ -41,7 +41,7 @@ with DAG(
     dag_id="init_and_seed_oltp",
     default_args=DEFAULT_ARGS,
     start_date=datetime(2024, 1, 1),
-    schedule_interval=None,
+    schedule=None,
     catchup=False,
     tags=["tutorial", "bootstrap"],
 ) as dag:

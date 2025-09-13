@@ -1,8 +1,77 @@
+# WARNING: This configuration is for local development. Do not use it in a production deployment.
+#
+# This configuration supports basic configuration using environment variables or an .env file
+# The following variables are supported:
+#
+# AIRFLOW_IMAGE_NAME           - Docker image name used to run Airflow.
+#                                Default: apache/airflow:3.0.0
+# AIRFLOW_UID                  - User ID in Airflow containers
+#                                Default: 50000
+# AIRFLOW_PROJ_DIR             - Base path to which all the files will be volumed.
+#                                Default: .
+# Those configurations are useful mostly in case of standalone testing/running Airflow in test/try-out mode
+#
+# _AIRFLOW_WWW_USER_USERNAME   - Username for the administrator account (if requested).
+#                                Default: airflow
+# _AIRFLOW_WWW_USER_PASSWORD   - Password for the administrator account (if requested).
+#                                Default: airflow
+# _PIP_ADDITIONAL_REQUIREMENTS - Additional PIP requirements to add when starting all containers.
+#                                Use this option ONLY for quick checks. Installing requirements at container
+#                                startup is done EVERY TIME the service is started.
+#                                A better way is to build a custom image or extend the official image
+#                                as described in https://airflow.apache.org/docs/docker-stack/build.html.
+#                                Default: ''
+#
+# Feel free to modify this file to suit your needs.
+---
+x-airflow-common:
+  &airflow-common
+  # In order to add custom dependencies or upgrade provider distributions you can use your extended image.
+  # Comment the image line, place your Dockerfile in the directory where you placed the docker-compose.yaml
+  # and uncomment the "build" line below, Then run `docker-compose build` to build the images.
+  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:3.0.0}
+  # build: .
+  environment:
+    &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+    AIRFLOW__API_AUTH__JWT_SECRET: 'test-key'
+    # AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    # AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
+    AIRFLOW__CORE__FERNET_KEY: ''
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
+    # yamllint disable rule:line-length
+    # Use simple http server on scheduler for health checks
+    # See https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html#scheduler-health-check-server
+    # yamllint enable rule:line-length
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    # WARNING: Use _PIP_ADDITIONAL_REQUIREMENTS option ONLY for a quick checks
+    # for other purpose (development, test and especially production usage) build/extend Airflow image.
+    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
+    # The following line can be used to set a custom config file, stored in the local config folder
+    AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
+    PYTHONPATH: /opt/airflow:/opt/airflow/dags:/opt/airflow/script
+  volumes:
+    - ${AIRFLOW_PROJ_DIR:-.}/airflow/dags:/opt/airflow/dags
+    - ${AIRFLOW_PROJ_DIR:-.}/airflow/logs:/opt/airflow/logs
+    - ${AIRFLOW_PROJ_DIR:-.}/airflow/config:/opt/airflow/config
+    - ${AIRFLOW_PROJ_DIR:-.}/airflow/plugins:/opt/airflow/plugins
+    - ${AIRFLOW_PROJ_DIR:-.}/script:/opt/airflow/script
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    &airflow-common-depends-on
+    # redis:
+    #   condition: service_healthy
+    postgres-airflow:
+      condition: service_healthy
+
 services:
   # PostgreSQL OLTP database
   postgres-oltp:
     image: postgres:16-alpine
-    container_name: postgres-oltp
     restart: unless-stopped
     command: ["postgres", "-c", "wal_level=logical", "-c", "max_wal_senders=10", "-c", "max_replication_slots=10", "-c", "wal_keep_size=64"]
     environment:
@@ -14,7 +83,8 @@ services:
       - "5432:5432"
     volumes:
       # Persistent data directory (bind mount for easy inspection)
-      - ./postgresql/data:/var/lib/postgresql/data
+      # - ./postgresql/data:/var/lib/postgresql/data
+      - postgres-oltp-db-volume:/var/lib/postgresql/data
       # Initialization SQL scripts (run once on first boot)
       - ./postgresql/init:/docker-entrypoint-initdb.d
     healthcheck:
@@ -28,14 +98,13 @@ services:
   # Dedicated PostgreSQL for Airflow metadata DB
   postgres-airflow:
     image: postgres:16-alpine
-    container_name: postgres-airflow
     restart: unless-stopped
     environment:
       - POSTGRES_USER=airflow
       - POSTGRES_PASSWORD=airflow
       - POSTGRES_DB=airflow
     volumes:
-      - ./airflow/postgresql/data:/var/lib/postgresql/data
+      - postgres-airflow-db-volume:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -47,7 +116,6 @@ services:
   zookeeper:
     image: debezium/zookeeper:${DEBEZIUM_VERSION:-2.1.2.Final}
     platform: linux/amd64
-    container_name: zookeeper
     restart: unless-stopped
     ports:
       - "2181:2181"
@@ -57,7 +125,6 @@ services:
   kafka:
     image: debezium/kafka:${DEBEZIUM_VERSION:-2.1.2.Final}
     platform: linux/amd64
-    container_name: kafka
     restart: unless-stopped
     depends_on:
       - zookeeper
@@ -77,7 +144,6 @@ services:
   connect:
     image: debezium/connect:${DEBEZIUM_VERSION:-2.1.2.Final}
     platform: linux/amd64
-    container_name: debezium-connect
     restart: unless-stopped
     depends_on:
       postgres-oltp:
@@ -103,7 +169,6 @@ services:
   debezium-ui:
     image: debezium/debezium-ui:${DEBEZIUM_VERSION:-2.1.2.Final}
     platform: linux/amd64
-    container_name: debezium-ui
     restart: unless-stopped
     depends_on:
       - connect
@@ -116,7 +181,6 @@ services:
 
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
-    container_name: kafka-ui
     restart: unless-stopped
     depends_on:
       - kafka
@@ -131,105 +195,109 @@ services:
     networks:
       - internal
 
-  # Apache Airflow
-  airflow-init:
-    build:
-      context: ./airflow
-      dockerfile: Dockerfile
-    image: custom-airflow:2.9.3
-    container_name: airflow-init
-    depends_on:
-      postgres-airflow:
-        condition: service_healthy
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
-      - _AIRFLOW_WWW_USER_USERNAME=admin
-      - _AIRFLOW_WWW_USER_PASSWORD=admin
-      - PYTHONPATH=/opt/airflow:/opt/airflow/dags:/opt/airflow/script
-    entrypoint: /bin/bash
-    command: -c "airflow db init && airflow users create --role Admin --username $$_AIRFLOW_WWW_USER_USERNAME --password $$_AIRFLOW_WWW_USER_PASSWORD --firstname Admin --lastname User --email admin@example.com"
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-      - ./airflow/plugins:/opt/airflow/plugins
-      - ./script:/opt/airflow/script
-    networks:
-      - internal
-
-  airflow-webserver:
-    image: custom-airflow:2.9.3
-    container_name: airflow-webserver
-    restart: unless-stopped
-    depends_on:
-      postgres-airflow:
-        condition: service_healthy
-      airflow-init:
-        condition: service_completed_successfully
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
-      - PYTHONPATH=/opt/airflow:/opt/airflow/dags:/opt/airflow/script
+  # Apache Airflow v3.0
+  airflow-apiserver:
+    <<: *airflow-common
+    command: api-server
     ports:
       - "8088:8080"
-    command: webserver
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-      - ./airflow/plugins:/opt/airflow/plugins
-      - ./script:/opt/airflow/script
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
     networks:
       - internal
 
   airflow-scheduler:
-    image: custom-airflow:2.9.3
-    container_name: airflow-scheduler
-    restart: unless-stopped
+    <<: *airflow-common
+    command: scheduler
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
     depends_on:
-      postgres-airflow:
-        condition: service_healthy
+      <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-      airflow-webserver:
-        condition: service_started
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
-      - PYTHONPATH=/opt/airflow:/opt/airflow/dags:/opt/airflow/script
-    command: scheduler
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-      - ./airflow/plugins:/opt/airflow/plugins
-      - ./script:/opt/airflow/script
+    networks:
+      - internal
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
     networks:
       - internal
 
   airflow-triggerer:
-    image: custom-airflow:2.9.3
-    container_name: airflow-triggerer
-    restart: unless-stopped
+    <<: *airflow-common
+    command: triggerer
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
     depends_on:
-      postgres-airflow:
-        condition: service_healthy
+      <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
-      - PYTHONPATH=/opt/airflow:/opt/airflow/dags:/opt/airflow/script
-    command: triggerer
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-      - ./airflow/plugins:/opt/airflow/plugins
-      - ./script:/opt/airflow/script
     networks:
       - internal
 
+  airflow-init:
+    <<: *airflow-common
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+      _PIP_ADDITIONAL_REQUIREMENTS: ''
+    entrypoint: /bin/bash
+    command: -c "airflow db migrate && airflow users create --role Admin --username $$_AIRFLOW_WWW_USER_USERNAME --password $$_AIRFLOW_WWW_USER_PASSWORD --firstname Admin --lastname User --email admin@example.com"
+    networks:
+      - internal
+  
+  airflow-cli:
+    <<: *airflow-common
+    profiles:
+      - debug
+    environment:
+      <<: *airflow-common-env
+      CONNECTION_CHECK_MAX_COUNT: "0"
+    # Workaround for entrypoint issue. See: https://github.com/apache/airflow/issues/16252
+    command:
+      - bash
+      - -c
+      - airflow
+    depends_on:
+      <<: *airflow-common-depends-on
+
 networks:
   internal:
+
+volumes:
+  postgres-oltp-db-volume:
+  postgres-airflow-db-volume:

@@ -50,7 +50,7 @@ with DAG(
     dag_id="export_orders_csv",
     default_args=DEFAULT_ARGS,
     start_date=datetime(2024, 1, 1),
-    schedule_interval="@daily",
+    schedule="@daily",
     catchup=False,
     tags=["tutorial", "export"],
 ) as dag:
