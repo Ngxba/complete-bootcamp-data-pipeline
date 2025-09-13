@@ -1,6 +1,6 @@
 services:
   # PostgreSQL OLTP database
-  postgres:
+  postgres-oltp:
     image: postgres:16-alpine
     container_name: postgres-oltp
     restart: unless-stopped
@@ -17,6 +17,25 @@ services:
       - ./postgresql/data:/var/lib/postgresql/data
       # Initialization SQL scripts (run once on first boot)
       - ./postgresql/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # Dedicated PostgreSQL for Airflow metadata DB
+  postgres-airflow:
+    image: postgres:16-alpine
+    container_name: postgres-airflow
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    volumes:
+      - ./airflow/postgresql/data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -61,7 +80,7 @@ services:
     container_name: debezium-connect
     restart: unless-stopped
     depends_on:
-      postgres:
+      postgres-oltp:
         condition: service_healthy
       kafka:
         condition: service_started
@@ -109,6 +128,106 @@ services:
       - KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS=http://connect:8083
     ports:
       - "8081:8080"
+    networks:
+      - internal
+
+  # Apache Airflow
+  airflow-init:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    image: custom-airflow:2.9.3
+    container_name: airflow-init
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+      - _AIRFLOW_WWW_USER_USERNAME=admin
+      - _AIRFLOW_WWW_USER_PASSWORD=admin
+      - PYTHONPATH=/opt/airflow:/opt/airflow/dags:/opt/airflow/script
+    entrypoint: /bin/bash
+    command: -c "airflow db init && airflow users create --role Admin --username $$_AIRFLOW_WWW_USER_USERNAME --password $$_AIRFLOW_WWW_USER_PASSWORD --firstname Admin --lastname User --email admin@example.com"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./script:/opt/airflow/script
+    networks:
+      - internal
+
+  airflow-webserver:
+    image: custom-airflow:2.9.3
+    container_name: airflow-webserver
+    restart: unless-stopped
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+      - PYTHONPATH=/opt/airflow:/opt/airflow/dags:/opt/airflow/script
+    ports:
+      - "8088:8080"
+    command: webserver
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./script:/opt/airflow/script
+    networks:
+      - internal
+
+  airflow-scheduler:
+    image: custom-airflow:2.9.3
+    container_name: airflow-scheduler
+    restart: unless-stopped
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-webserver:
+        condition: service_started
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+      - PYTHONPATH=/opt/airflow:/opt/airflow/dags:/opt/airflow/script
+    command: scheduler
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./script:/opt/airflow/script
+    networks:
+      - internal
+
+  airflow-triggerer:
+    image: custom-airflow:2.9.3
+    container_name: airflow-triggerer
+    restart: unless-stopped
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow:5432/airflow
+      - PYTHONPATH=/opt/airflow:/opt/airflow/dags:/opt/airflow/script
+    command: triggerer
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./script:/opt/airflow/script
     networks:
       - internal
 

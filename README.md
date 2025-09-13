@@ -15,3 +15,6 @@ kafka + debezium docker setup
 have to set "plugin.name": "pgoutput" in extra attribute. docs: https://debezium.io/documentation/reference/stable/connectors/postgresql.html
 run stream or create sample data.
 -> run oke, view stream, etc
+
+VIDEO 4:
+Ensure the Airflow Postgres provider is available. The official apache/airflow:2.9.3 image typically includes it; if not, install apache-airflow-providers-postgres in the image.
