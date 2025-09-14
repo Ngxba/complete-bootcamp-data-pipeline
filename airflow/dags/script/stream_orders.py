@@ -14,7 +14,7 @@ if CURRENT_DIR not in sys.path:
 
 from sqlalchemy.orm import sessionmaker
 
-from db_sqlalchemy import get_engine, Address, Order
+from script.db_sqlalchemy import get_engine, Address, Order
 
 
 def load_customer_addresses(session) -> List[Tuple[int, int]]:

@@ -11,5 +11,8 @@ wheels/
 
 # PostgreSQL data
 postgresql/data/*
+airflow/postgresql/data/*
+airflow/logs/*
+airflow/config/*
 
 .DS_Store
