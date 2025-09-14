@@ -44,3 +44,5 @@ All services are now running successfully:
 - ✅ **postgres-oltp** - Your OLTP database
 - ✅ **kafka, zookeeper, connect** - Kafka infrastructure
 - ✅ **debezium-ui, kafka-ui** - Management UIs
+
+uv pip freeze > requirements.txt

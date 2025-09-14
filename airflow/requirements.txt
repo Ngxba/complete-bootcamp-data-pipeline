@@ -1,0 +1,8 @@
+faker
+psycopg2-binary
+sqlalchemy
+typing-extensions
+tzdata
+
+# Airflow providers
+apache-airflow-providers-postgres
