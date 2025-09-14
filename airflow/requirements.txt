@@ -6,3 +6,14 @@ tzdata
 
 # Airflow providers
 apache-airflow-providers-postgres
+
+# Spark and data processing
+pyspark
+kafka-python
+minio
+pandas
+pyarrow
+great-expectations
+
+# Delta Lake (ensure compatibility with Spark version)
+delta-spark
