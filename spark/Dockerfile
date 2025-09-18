@@ -13,17 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Switch to spark user for pip installations
 USER ${spark_uid}
 
-# Install Python dependencies for data processing
-RUN pip install --no-cache-dir \
-    delta-spark==3.1.0 \
-    kafka-python==2.0.2 \
-    minio==7.2.0 \
-    pandas==2.1.4 \
-    pyarrow==14.0.2 \
-    great-expectations==0.18.8 \
-    jupyterlab==4.0.9 \
-    matplotlib==3.8.2 \
-    seaborn==0.13.0
+# Copy requirements.txt and install Python dependencies
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
 # Add Delta Lake and Kafka dependencies to Spark
 ENV SPARK_JARS_DIR=/opt/spark/jars
@@ -41,6 +33,11 @@ RUN curl -o ${SPARK_JARS_DIR}/delta-spark_2.12-3.1.0.jar \
 
 # Set proper permissions
 RUN chown -R ${spark_uid}:${spark_uid} ${SPARK_JARS_DIR}
+
+USER root
+
+# Create Spark configuration directory if it doesn't exist
+RUN mkdir -p /opt/spark/conf
 
 USER ${spark_uid}
 

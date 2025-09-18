@@ -119,6 +119,10 @@ services:
     restart: unless-stopped
     ports:
       - "2181:2181"
+    volumes:
+      - zookeeper-data:/zookeeper/data
+      - zookeeper-txns:/zookeeper/txns
+      - zookeeper-logs:/zookeeper/logs
     networks:
       - internal
 
@@ -138,6 +142,9 @@ services:
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
     ports:
       - "9092:9092"
+    volumes:
+      - kafka-data:/kafka/data
+      - kafka-logs:/kafka/logs
     networks:
       - internal
 
@@ -150,6 +157,8 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+      minio:
+        condition: service_healthy
     environment:
       - BOOTSTRAP_SERVERS=kafka:9092
       - GROUP_ID=1
@@ -163,6 +172,10 @@ services:
       - CONNECT_REST_EXTENSION_CLASSES=io.debezium.kcrestextension.DebeziumConnectRestExtension
     ports:
       - "8083:8083"
+    volumes:
+      - connect-data:/kafka/data
+      - connect-logs:/kafka/logs
+      - ./kafka-connect/connectors:/etc/kafka-connect/connectors
     networks:
       - internal
 
@@ -428,3 +441,10 @@ volumes:
   postgres-airflow-db-volume:
   minio-data:
   spark-logs:
+  zookeeper-data:
+  zookeeper-txns:
+  zookeeper-logs:
+  kafka-data:
+  kafka-logs:
+  connect-data:
+  connect-logs:
