@@ -15,12 +15,20 @@ ENV PY_MM=${PY_MM}
 
 # (Optional) install system packages
 USER root
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    vim-tiny curl \
- && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && \
+    apt-get install -y openjdk-17-jdk && \
+    apt-get install -y ant && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
 USER airflow
 
 # Add Python dependencies
 COPY requirements.txt /requirements.txt
 RUN pip install --no-cache-dir -r /requirements.txt \
     --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PY_MM}.txt"
+
+
+# Set JAVA_HOME
+ENV JAVA_HOME /usr/lib/jvm/java-17-openjdk-arm64
+RUN export JAVA_HOME

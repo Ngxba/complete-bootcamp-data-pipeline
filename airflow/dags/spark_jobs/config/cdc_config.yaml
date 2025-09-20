@@ -1,0 +1,202 @@
+# Enhanced CDC Configuration for Spark Framework
+# This file controls all aspects of CDC processing behavior
+
+spark:
+  # Processing mode: batch or streaming
+  mode: "batch"
+
+  # Application name prefix
+  app_name_prefix: "CDC-Processor"
+
+  # Custom Spark configurations (optional)
+  custom_config:
+    spark.sql.adaptive.enabled: "true"
+    spark.sql.adaptive.coalescePartitions.enabled: "true"
+    spark.sql.adaptive.skewJoin.enabled: "true"
+
+# Debezium CDC Configuration
+debezium:
+  # Global settings applied to all tables unless overridden
+  settings:
+    # Schema handling
+    auto_infer_schema: true
+    use_fallback_schema: true
+
+    # Default CDC data extraction mode
+    # Options: DATA_BEFORE, DATA_AFTER, DATA_BEFORE_AFTER
+    cdc_data_mode: "DATA_AFTER"
+
+    # Timezone for timestamp conversions
+    timezone: "UTC"
+
+    # Include full Debezium envelope in output
+    include_envelope: true
+
+  # Table-specific configurations
+  tables:
+    orders:
+      # Primary key field - IMPORTANT: Use actual field name from Debezium
+      primary_key: "order_id"
+
+      # CDC data mode for this table (overrides global setting)
+      cdc_data_mode: "DATA_AFTER"
+
+      # When using DATA_BEFORE_AFTER, which data to prioritize
+      # Options: "before", "after"
+      data_priority: "after"
+
+      # Partitioning strategy
+      # Options: "timestamp" (uses CDC timestamp), "created_at" (uses record timestamp)
+      partition_strategy: "timestamp"
+
+      # Field type overrides and transformations
+      field_overrides:
+        created_at:
+          type: "timestamp"
+          scale: "microseconds"  # Convert from MicroTimestamp
+
+      # Custom transformations
+      transformations:
+        # Fields to convert from cents to dollars
+        monetary_fields:
+          - subtotal_cents
+          - shipping_cents
+          - tax_cents
+          - total_cents
+
+        # Additional transformation rules can be added here
+        # date_fields: []
+        # string_fields: []
+
+    # Example configuration for another table
+    order_items:
+      primary_key: "order_item_id"
+      cdc_data_mode: "DATA_AFTER"
+      data_priority: "after"
+      partition_strategy: "timestamp"
+
+      field_overrides:
+        unit_price_cents:
+          type: "int32"
+        created_at:
+          type: "timestamp"
+          scale: "microseconds"
+
+      transformations:
+        monetary_fields:
+          - unit_price_cents
+          - total_price_cents
+
+    # Example for a table that tracks deletions
+    audit_log:
+      primary_key: "audit_id"
+      cdc_data_mode: "DATA_BEFORE_AFTER"
+      data_priority: "before"  # Prioritize 'before' data for audit purposes
+      partition_strategy: "timestamp"
+
+# Kafka Configuration
+kafka:
+  # Kafka broker configuration
+  bootstrap_servers: "kafka:9092"
+
+  # Consumer settings
+  consumer:
+    auto_offset_reset: "earliest"
+    max_poll_records: 1000
+
+  # Topic naming patterns
+  topic_patterns:
+    debezium_prefix: "debezium"
+    table_format: "{prefix}.{schema}.{table}"
+
+# Storage Configuration
+storage:
+  # Bronze layer configuration
+  bronze:
+    base_path: "s3a://bronze"
+    format: "hudi"
+
+    # Hudi-specific settings
+    hudi:
+      # Table type: COPY_ON_WRITE or MERGE_ON_READ
+      table_type: "COPY_ON_WRITE"
+
+      # Performance settings
+      parallelism:
+        upsert: 4
+        insert: 4
+        bulkinsert: 4
+
+      # File management
+      clean:
+        policy: "KEEP_LATEST_COMMITS"
+        commits_retained: 3
+
+      # Archive settings
+      archive:
+        min_commits: 4
+        max_commits: 6
+
+# Streaming Configuration (when mode is "streaming")
+streaming:
+  # Checkpoint configuration
+  checkpoint:
+    base_path: "s3a://bronze/checkpoints"
+
+  # Trigger settings
+  trigger:
+    processing_time: "30 seconds"
+
+  # Output modes
+  output_mode: "append"
+
+  # Retry settings
+  retry:
+    count: 3
+    ignore_failed_batch: true
+
+# Monitoring and Logging
+monitoring:
+  # Metrics collection
+  enable_metrics: true
+
+  # Sample data display
+  show_sample_data: true
+  sample_rows: 5
+
+  # Progress reporting
+  log_progress_interval: "1 minute"
+
+  # Data quality checks
+  enable_validation: true
+  validation_rules:
+    - check_primary_key_not_null
+    - check_timestamp_validity
+    - check_monetary_fields_positive
+
+# Environment-specific overrides
+# These can be used to override settings for different environments
+environments:
+  development:
+    spark:
+      custom_config:
+        spark.sql.shuffle.partitions: "10"
+    storage:
+      bronze:
+        hudi:
+          parallelism:
+            upsert: 2
+            insert: 2
+            bulkinsert: 2
+
+  production:
+    spark:
+      custom_config:
+        spark.sql.shuffle.partitions: "200"
+    storage:
+      bronze:
+        hudi:
+          parallelism:
+            upsert: 8
+            insert: 8
+            bulkinsert: 8

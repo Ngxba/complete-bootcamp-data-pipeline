@@ -3,6 +3,7 @@ psycopg2-binary
 sqlalchemy
 typing-extensions
 tzdata
+pyyaml
 
 # Airflow providers
 apache-airflow-providers-postgres
